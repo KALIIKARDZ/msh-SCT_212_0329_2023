@@ -29,7 +29,23 @@ static void print_help(void)
     printf("  cd [dir]   change directory (no arg goes to $HOME)\n");
     printf("  help       show this help\n");
     printf("  exit       leave the shell\n");
+    printf("Append & to run a command in the background.\n");
     printf("Anything else is run as an external command via fork/exec.\n");
+}
+
+/*
+ * Reap any finished background children without blocking.
+ * Called before each prompt so zombies don't accumulate.
+ */
+static void reap_background(void)
+{
+    int st;
+    pid_t pid;
+    while ((pid = waitpid(-1, &st, WNOHANG)) > 0) {
+        /* optionally print "[bg] <pid> done status N"; keep quiet to
+         * match the assignment's simple output requirement. */
+        (void)st;
+    }
 }
 
 static int run_builtin(char **argv, int argc, int *should_exit)
@@ -62,7 +78,12 @@ static int run_builtin(char **argv, int argc, int *should_exit)
     return -1;
 }
 
-static int run_external(char **argv)
+/*
+ * Run an external command.
+ * background = 1: don't wait; print "[bg] <pid>" and return 0.
+ * background = 0: wait and return child's exit status (or 128+sig).
+ */
+static int run_external(char **argv, int background)
 {
     pid_t pid = fork();
     if (pid < 0) {
@@ -74,6 +95,11 @@ static int run_external(char **argv)
         execvp(argv[0], argv);
         fprintf(stderr, "msh: %s: %s\n", argv[0], strerror(errno));
         _exit(127);
+    }
+
+    if (background) {
+        printf("[bg] %d\n", (int)pid);
+        return 0;                               /* don't wait; reaped later */
     }
 
     int st = 0;
@@ -99,7 +125,8 @@ int main(void)
     int should_exit = 0;
 
     while (!should_exit) {
-        printf("msh[%d]> ", status);            /* prompt shows last status */
+        reap_background();                      /* collect any finished bg jobs */
+        printf("msh[%d]> ", status);
         fflush(stdout);
 
         ssize_t n = getline(&line, &cap, stdin);
@@ -110,13 +137,24 @@ int main(void)
 
         int argc = parse_line(line, argv);
         if (argc == 0)
-            continue;                           /* blank line: no status change */
+            continue;
 
+        /* Strip trailing '&' -> background flag */
+        int background = 0;
+        if (argc > 0 && strcmp(argv[argc - 1], "&") == 0) {
+            background = 1;
+            argv[--argc] = NULL;
+            if (argc == 0)              /* just "&" alone: ignore */
+                continue;
+        }
+
+        /* Built-ins aren't backgrounded — bash treats `cd &` as
+         * a foreground builtin. Keep it simple: run in foreground. */
         int rc = run_builtin(argv, argc, &should_exit);
         if (rc >= 0)
             status = rc;
         else
-            status = run_external(argv);
+            status = run_external(argv, background);
     }
 
     free(line);
