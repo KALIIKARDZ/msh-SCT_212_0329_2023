@@ -32,25 +32,16 @@ static void print_help(void)
     printf("Anything else is run as an external command via fork/exec.\n");
 }
 
-/*
- * Run a built-in if argv[0] matches one.
- *   -1  -> not a built-in; caller runs it via fork/exec
- *    0  -> built-in succeeded
- *   >0  -> built-in failed with that status
- * Sets *should_exit=1 when the shell should terminate.
- */
 static int run_builtin(char **argv, int argc, int *should_exit)
 {
     if (strcmp(argv[0], "exit") == 0) {
         *should_exit = 1;
         return 0;
     }
-
     if (strcmp(argv[0], "help") == 0) {
         print_help();
         return 0;
     }
-
     if (strcmp(argv[0], "cd") == 0) {
         const char *target;
         if (argc < 2) {
@@ -68,8 +59,7 @@ static int run_builtin(char **argv, int argc, int *should_exit)
         }
         return 0;
     }
-
-    return -1;                          /* not a built-in */
+    return -1;
 }
 
 static int run_external(char **argv)
@@ -79,7 +69,6 @@ static int run_external(char **argv)
         perror("fork");
         return 1;
     }
-
     if (pid == 0) {
         signal(SIGINT, SIG_DFL);
         execvp(argv[0], argv);
@@ -92,7 +81,6 @@ static int run_external(char **argv)
         perror("waitpid");
         return 1;
     }
-
     if (WIFEXITED(st))
         return WEXITSTATUS(st);
     if (WIFSIGNALED(st))
@@ -111,7 +99,7 @@ int main(void)
     int should_exit = 0;
 
     while (!should_exit) {
-        printf("msh[0]> ");
+        printf("msh[%d]> ", status);            /* prompt shows last status */
         fflush(stdout);
 
         ssize_t n = getline(&line, &cap, stdin);
@@ -122,16 +110,13 @@ int main(void)
 
         int argc = parse_line(line, argv);
         if (argc == 0)
-            continue;
+            continue;                           /* blank line: no status change */
 
         int rc = run_builtin(argv, argc, &should_exit);
-        if (rc >= 0) {
+        if (rc >= 0)
             status = rc;
-        } else {
+        else
             status = run_external(argv);
-        }
-
-        printf("[debug] last status = %d\n", status);
     }
 
     free(line);
