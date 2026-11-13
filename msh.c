@@ -22,6 +22,56 @@ static int parse_line(char *line, char **argv)
     return argc;
 }
 
+static void print_help(void)
+{
+    printf("msh - minimal shell\n");
+    printf("Built-ins:\n");
+    printf("  cd [dir]   change directory (no arg goes to $HOME)\n");
+    printf("  help       show this help\n");
+    printf("  exit       leave the shell\n");
+    printf("Anything else is run as an external command via fork/exec.\n");
+}
+
+/*
+ * Run a built-in if argv[0] matches one.
+ *   -1  -> not a built-in; caller runs it via fork/exec
+ *    0  -> built-in succeeded
+ *   >0  -> built-in failed with that status
+ * Sets *should_exit=1 when the shell should terminate.
+ */
+static int run_builtin(char **argv, int argc, int *should_exit)
+{
+    if (strcmp(argv[0], "exit") == 0) {
+        *should_exit = 1;
+        return 0;
+    }
+
+    if (strcmp(argv[0], "help") == 0) {
+        print_help();
+        return 0;
+    }
+
+    if (strcmp(argv[0], "cd") == 0) {
+        const char *target;
+        if (argc < 2) {
+            target = getenv("HOME");
+            if (target == NULL) {
+                fprintf(stderr, "msh: cd: HOME not set\n");
+                return 1;
+            }
+        } else {
+            target = argv[1];
+        }
+        if (chdir(target) != 0) {
+            fprintf(stderr, "msh: cd: %s: %s\n", target, strerror(errno));
+            return 1;
+        }
+        return 0;
+    }
+
+    return -1;                          /* not a built-in */
+}
+
 static int run_external(char **argv)
 {
     pid_t pid = fork();
@@ -31,7 +81,7 @@ static int run_external(char **argv)
     }
 
     if (pid == 0) {
-        signal(SIGINT, SIG_DFL);        /* child obeys Ctrl-C */
+        signal(SIGINT, SIG_DFL);
         execvp(argv[0], argv);
         fprintf(stderr, "msh: %s: %s\n", argv[0], strerror(errno));
         _exit(127);
@@ -52,14 +102,15 @@ static int run_external(char **argv)
 
 int main(void)
 {
-    signal(SIGINT, SIG_IGN);            /* shell survives Ctrl-C (Task 8) */
+    signal(SIGINT, SIG_IGN);
 
     char *line = NULL;
     size_t cap = 0;
     int status = 0;
     char *argv[MAX_ARGS];
+    int should_exit = 0;
 
-    while (1) {
+    while (!should_exit) {
         printf("msh[0]> ");
         fflush(stdout);
 
@@ -73,7 +124,13 @@ int main(void)
         if (argc == 0)
             continue;
 
-        status = run_external(argv);
+        int rc = run_builtin(argv, argc, &should_exit);
+        if (rc >= 0) {
+            status = rc;
+        } else {
+            status = run_external(argv);
+        }
+
         printf("[debug] last status = %d\n", status);
     }
 
