@@ -36,12 +36,14 @@ static void print_help(void)
     printf("Anything else is run as an external command via fork/exec.\n");
 }
 
+/* Reap any finished background children without blocking. */
 static void reap_background(void)
 {
     while (waitpid(-1, NULL, WNOHANG) > 0)
         ;
 }
 
+/* Returns the built-in's exit status, or -1 if argv[0] is not a built-in. */
 static int run_builtin(char **argv, int argc, int *should_exit)
 {
     if (strcmp(argv[0], "exit") == 0) {
@@ -72,6 +74,7 @@ static int run_builtin(char **argv, int argc, int *should_exit)
     return -1;
 }
 
+/* CHILD only: point stdout at filename (create/truncate, mode 0644). */
 static int redirect_stdout(const char *filename)
 {
     int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -96,7 +99,15 @@ static int run_external(char **argv, int background, const char *redirect_to)
         return 1;
     }
     if (pid == 0) {
-        signal(SIGINT, SIG_DFL);        /* child obeys Ctrl-C (Task 8) */
+        /*
+         * TASK 8: the shell ignores SIGINT, and that is inherited across
+         * fork(). Foreground children get SIG_DFL back so Ctrl-C kills
+         * them; background children keep SIG_IGN so a Ctrl-C aimed at a
+         * foreground job does not also kill them. (Ignored dispositions
+         * survive execvp, so the child program inherits the choice.)
+         */
+        signal(SIGINT, background ? SIG_IGN : SIG_DFL);
+
         if (redirect_to != NULL && redirect_stdout(redirect_to) < 0)
             _exit(1);
         execvp(argv[0], argv);
@@ -116,14 +127,22 @@ static int run_external(char **argv, int background, const char *redirect_to)
     }
     if (WIFEXITED(st))
         return WEXITSTATUS(st);
-    if (WIFSIGNALED(st))
+    if (WIFSIGNALED(st)) {
+        if (WTERMSIG(st) == SIGINT)
+            printf("\n");   /* finish the line that "^C" left open */
         return 128 + WTERMSIG(st);
+    }
     return 1;
 }
 
 int main(void)
 {
-    signal(SIGINT, SIG_IGN);            /* shell survives Ctrl-C (Task 8) */
+    /*
+     * TASK 8: Ctrl-C must interrupt a running foreground command but
+     * not the shell. The shell learns the child died via waitpid() +
+     * WIFSIGNALED() and reports 128+signo as the status.
+     */
+    signal(SIGINT, SIG_IGN);
 
     char *line = NULL;
     size_t cap = 0;
