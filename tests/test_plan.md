@@ -28,7 +28,6 @@ each test is part of the result.
 | 13 | `echo hi >` | syntax error, nothing runs | `msh: syntax error: expected filename after '>'`, prompt `msh[1]>` | PASS |
 | 14 | `> f3.txt` | syntax error, no file created | `msh: syntax error: no command before '>'`, prompt `msh[1]>` | PASS |
 | 15 | `echo hi > f.txt extra` | syntax error, nothing runs | `msh: syntax error: unexpected token after filename`, prompt `msh[1]>` | PASS |
-
 | 16 | `sleep 1 &`, wait 2 s, press Enter, then `ps` | no zombie left behind | no `<defunct>` entry, the job had been reaped | PASS |
 | 17 | `sleep 100 &`, then Ctrl-C at the prompt | shell and background job both survive | prompt came back, `ps` still listed the sleep | PASS |
 
